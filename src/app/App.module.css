@@ -1,0 +1,57 @@
+.page {
+  min-height: 100vh;
+  display: grid;
+  grid-template-columns: minmax(320px, 420px) 1fr;
+  background:
+    radial-gradient(circle at 15% 15%, rgba(53, 114, 201, 0.28), transparent 40%),
+    radial-gradient(circle at 85% 90%, rgba(35, 130, 108, 0.24), transparent 45%),
+    linear-gradient(160deg, #0a1628 0%, #10213a 55%, #0b1b2f 100%);
+  color: #ecf5ff;
+}
+
+.leftPane {
+  padding: 24px;
+  border-right: 1px solid rgba(184, 210, 240, 0.2);
+  backdrop-filter: blur(6px);
+}
+
+.rightPane {
+  padding: 24px;
+  overflow: auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.header h1 {
+  margin: 0;
+  font-size: 1.8rem;
+  letter-spacing: 0.02em;
+}
+
+.header p {
+  margin: 8px 0 20px;
+  color: #c8d9ec;
+  line-height: 1.4;
+}
+
+.canvas {
+  width: min(100%, 1200px);
+  height: auto;
+  border-radius: 14px;
+  border: 1px solid rgba(216, 235, 255, 0.24);
+  box-shadow: 0 16px 60px rgba(8, 12, 18, 0.45);
+  background: linear-gradient(180deg, #0f2237 0%, #122942 100%);
+}
+
+@media (max-width: 1024px) {
+  .page {
+    grid-template-columns: 1fr;
+  }
+
+  .leftPane {
+    border-right: 0;
+    border-bottom: 1px solid rgba(184, 210, 240, 0.2);
+  }
+}
+

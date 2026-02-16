@@ -1,0 +1,96 @@
+.group {
+  margin-bottom: 18px;
+  padding: 14px;
+  border-radius: 12px;
+  border: 1px solid rgba(204, 227, 250, 0.2);
+  background: rgba(16, 32, 52, 0.5);
+}
+
+.groupTitle {
+  margin: 0 0 10px;
+  font-size: 0.92rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #cde6ff;
+}
+
+.field {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.field label {
+  font-size: 0.86rem;
+  color: #dcecff;
+}
+
+.input,
+.select {
+  width: 100%;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(168, 197, 228, 0.28);
+  background: rgba(10, 22, 37, 0.85);
+  color: #e8f5ff;
+}
+
+.input:focus,
+.select:focus,
+.button:focus {
+  outline: 2px solid #78aef2;
+  outline-offset: 2px;
+}
+
+.inline {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.buttonRow {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.button {
+  padding: 10px;
+  border-radius: 10px;
+  border: 1px solid rgba(173, 203, 237, 0.35);
+  color: #eff8ff;
+  cursor: pointer;
+  background: linear-gradient(120deg, #194d79 0%, #2b678f 100%);
+  transition: transform 140ms ease, opacity 140ms ease;
+}
+
+.button:hover {
+  transform: translateY(-1px);
+}
+
+.button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.secondary {
+  background: linear-gradient(120deg, #20354e 0%, #2c445f 100%);
+}
+
+.summaryText {
+  margin: 6px 0;
+  color: #d9e9f8;
+}
+
+.issueList {
+  margin: 8px 0 0;
+  padding-left: 16px;
+  color: #ffced6;
+}
+
+.status {
+  margin: 8px 0 0;
+  color: #9fd4ff;
+  font-size: 0.88rem;
+}
+
