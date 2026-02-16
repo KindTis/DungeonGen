@@ -66,5 +66,24 @@ describe('tilemap conversion', () => {
     expect(validation.stats.connected).toBe(true)
     expect(validation.stats.startBossDistance).toBeGreaterThan(0)
   })
-})
 
+  it('places doors on connected room boundaries', () => {
+    const tilemap = buildSampleTilemap(123456)
+    const roomById = new Map(tilemap.rooms.map((room) => [room.id, room]))
+
+    const isOnBoundary = (door: { x: number; y: number }, room: { x: number; y: number; w: number; h: number }) => {
+      const onVertical = (door.x === room.x || door.x === room.x + room.w - 1) && door.y >= room.y && door.y < room.y + room.h
+      const onHorizontal = (door.y === room.y || door.y === room.y + room.h - 1) && door.x >= room.x && door.x < room.x + room.w
+      return onVertical || onHorizontal
+    }
+
+    for (const door of tilemap.doors) {
+      const roomA = roomById.get(door.roomA)
+      const roomB = roomById.get(door.roomB)
+      expect(Boolean(roomA || roomB)).toBe(true)
+      const valid =
+        (roomA ? isOnBoundary(door, roomA) : false) || (roomB ? isOnBoundary(door, roomB) : false)
+      expect(valid).toBe(true)
+    }
+  })
+})

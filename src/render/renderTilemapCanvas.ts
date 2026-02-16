@@ -54,6 +54,23 @@ function wallMask(tilemap: Tilemap, x: number, y: number): number {
   return mask
 }
 
+type DoorOrientation = 'vertical' | 'horizontal' | 'block'
+
+function doorOrientation(tilemap: Tilemap, x: number, y: number): DoorOrientation {
+  const left = isInside(tilemap, x - 1, y) && isPassable(tilemap.tiles[tileIndex(tilemap.width, x - 1, y)])
+  const right = isInside(tilemap, x + 1, y) && isPassable(tilemap.tiles[tileIndex(tilemap.width, x + 1, y)])
+  const up = isInside(tilemap, x, y - 1) && isPassable(tilemap.tiles[tileIndex(tilemap.width, x, y - 1)])
+  const down = isInside(tilemap, x, y + 1) && isPassable(tilemap.tiles[tileIndex(tilemap.width, x, y + 1)])
+
+  if (left && right && !up && !down) {
+    return 'vertical'
+  }
+  if (up && down && !left && !right) {
+    return 'horizontal'
+  }
+  return 'block'
+}
+
 function fillBackground(
   context: CanvasRenderingContext2D,
   width: number,
@@ -115,6 +132,44 @@ function drawWallOverlay(
   }
 }
 
+function drawDoorOverlay(
+  context: CanvasRenderingContext2D,
+  orientation: DoorOrientation,
+  x: number,
+  y: number,
+  size: number,
+): void {
+  const inset = Math.max(1, Math.floor(size * 0.18))
+  const frame = '#2a1b12'
+  const plank = '#c18a52'
+  const highlight = '#ffd79a'
+  const shadow = '#6c472b'
+
+  context.fillStyle = frame
+  context.fillRect(x, y, size, size)
+  context.fillStyle = plank
+  context.fillRect(x + inset, y + inset, size - inset * 2, size - inset * 2)
+  context.strokeStyle = highlight
+  context.lineWidth = 1
+  context.strokeRect(x + inset, y + inset, size - inset * 2, size - inset * 2)
+
+  context.fillStyle = shadow
+  if (orientation === 'vertical') {
+    const mid = x + Math.floor(size / 2)
+    context.fillRect(mid - 1, y + inset, 2, size - inset * 2)
+  } else if (orientation === 'horizontal') {
+    const mid = y + Math.floor(size / 2)
+    context.fillRect(x + inset, mid - 1, size - inset * 2, 2)
+  } else {
+    context.fillRect(x + inset + 1, y + inset + 1, Math.max(1, size - inset * 2 - 2), 2)
+    context.fillRect(x + inset + 1, y + size - inset - 3, Math.max(1, size - inset * 2 - 2), 2)
+  }
+
+  context.fillStyle = highlight
+  const knob = Math.max(1, Math.floor(size * 0.12))
+  context.fillRect(x + size - inset - knob - 1, y + Math.floor(size / 2), knob, knob)
+}
+
 export function renderTilemapToCanvas(
   context: CanvasRenderingContext2D,
   tilemap: Tilemap,
@@ -159,6 +214,7 @@ export function renderTilemapToCanvas(
         drawWallOverlay(context, wallMask(tilemap, x, y), px, py, drawTileSize)
       } else if (tile === 'door') {
         context.drawImage(sprites.door, px, py, drawTileSize, drawTileSize)
+        drawDoorOverlay(context, doorOrientation(tilemap, x, y), px, py, drawTileSize)
       } else {
         context.fillStyle = '#0f131d'
         context.fillRect(px, py, drawTileSize, drawTileSize)
@@ -195,4 +251,3 @@ export function renderTilemapToCanvas(
   context.lineWidth = 1
   context.strokeRect(originX - 1, originY - 1, drawWidth + 2, drawHeight + 2)
 }
-
