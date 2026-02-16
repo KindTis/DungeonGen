@@ -66,7 +66,11 @@ export interface TilemapValidationResult {
   stats: TilemapStats
 }
 
-const TILEMAP_VERSION = 'tilemap-mvp-1'
+const TILEMAP_VERSION = 'tilemap-mvp-2'
+const HEAT_WEIGHT = 1.0
+const BEND_WEIGHT = 2
+const DOOR_PROXIMITY_RADIUS = 4
+const DOOR_PROXIMITY_WEIGHT = 6
 
 interface Point {
   x: number
@@ -82,8 +86,10 @@ interface DoorPlacement {
 }
 
 interface EdgeCorridorPath {
-  points: Point[]
+  from: Point
+  to: Point
   bend: Point
+  points: Point[]
 }
 
 function tileIndex(width: number, x: number, y: number): number {
@@ -96,6 +102,10 @@ function isInside(width: number, height: number, x: number, y: number): boolean 
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max)
+}
+
+function manhattan(a: Point, b: Point): number {
+  return Math.abs(a.x - b.x) + Math.abs(a.y - b.y)
 }
 
 function rectIntersects(a: RoomRect, b: RoomRect, padding: number): boolean {
@@ -226,7 +236,6 @@ function placeRoomCandidate(
     }
   }
 
-  // Deterministic fallback scan around the anchor.
   for (let radius = 1; radius < Math.max(width, height); radius += 1) {
     for (let dy = -radius; dy <= radius; dy += 1) {
       for (let dx = -radius; dx <= radius; dx += 1) {
@@ -283,6 +292,14 @@ function createDoorAndOutside(room: RoomRect, side: DoorSide, slot: number): Doo
   return { door: { x, y: room.y }, outside: { x, y: room.y - 1 }, side }
 }
 
+function isDoorOnRoomBoundary(door: Point, room: RoomRect): boolean {
+  const onVertical =
+    (door.x === room.x || door.x === room.x + room.w - 1) && door.y >= room.y && door.y < room.y + room.h
+  const onHorizontal =
+    (door.y === room.y || door.y === room.y + room.h - 1) && door.x >= room.x && door.x < room.x + room.w
+  return onVertical || onHorizontal
+}
+
 function isInsideRoomInterior(point: Point, room: RoomRect): boolean {
   return (
     point.x > room.x &&
@@ -292,79 +309,147 @@ function isInsideRoomInterior(point: Point, room: RoomRect): boolean {
   )
 }
 
-function getNextDoorSlot(
+function getDoorUsageRecord(
+  usageByRoom: Map<string, Record<DoorSide, number>>,
+  roomId: string,
+): Record<DoorSide, number> {
+  const usage = usageByRoom.get(roomId)
+  if (usage) {
+    return usage
+  }
+  const created: Record<DoorSide, number> = { north: 0, east: 0, south: 0, west: 0 }
+  usageByRoom.set(roomId, created)
+  return created
+}
+
+function peekDoorSlot(
   usageByRoom: Map<string, Record<DoorSide, number>>,
   roomId: string,
   side: DoorSide,
 ): number {
-  const usage = usageByRoom.get(roomId) ?? { north: 0, east: 0, south: 0, west: 0 }
-  const slot = usage[side]
-  usage[side] += 1
-  usageByRoom.set(roomId, usage)
-  return slot
+  return getDoorUsageRecord(usageByRoom, roomId)[side]
 }
 
-function buildCorridorPath(from: Point, to: Point): EdgeCorridorPath {
-  const dx = Math.abs(to.x - from.x)
-  const dy = Math.abs(to.y - from.y)
-  let bend: Point
-  if (dx >= dy) {
-    bend = { x: to.x, y: from.y }
-  } else {
-    bend = { x: from.x, y: to.y }
-  }
+function commitDoorSlot(
+  usageByRoom: Map<string, Record<DoorSide, number>>,
+  roomId: string,
+  side: DoorSide,
+): void {
+  getDoorUsageRecord(usageByRoom, roomId)[side] += 1
+}
 
+function totalDoorUsage(usage: Record<DoorSide, number>): number {
+  return usage.north + usage.east + usage.south + usage.west
+}
+
+function buildCorridorPath(from: Point, to: Point, preferHorizontalFirst: boolean): EdgeCorridorPath {
+  const bend = preferHorizontalFirst ? { x: to.x, y: from.y } : { x: from.x, y: to.y }
   const first = linePoints(from, bend)
   const second = linePoints(bend, to).slice(1)
-  return { points: [...first, ...second], bend }
+  return { from, to, bend, points: [...first, ...second] }
 }
 
-function carveCorridor(tiles: TileType[], width: number, height: number, path: EdgeCorridorPath): void {
-  if (path.points.length === 0) {
-    return
+function buildCorridorPathCandidates(from: Point, to: Point): EdgeCorridorPath[] {
+  const horizontalFirst = buildCorridorPath(from, to, true)
+  const verticalFirst = buildCorridorPath(from, to, false)
+  if (horizontalFirst.bend.x === verticalFirst.bend.x && horizontalFirst.bend.y === verticalFirst.bend.y) {
+    return [horizontalFirst]
   }
+  return [horizontalFirst, verticalFirst]
+}
+
+function scoreCorridorPath(
+  path: EdgeCorridorPath,
+  heat: number[],
+  width: number,
+  existingDoors: DoorPoint[],
+): number {
+  let heatPenalty = 0
   for (const point of path.points) {
-    if (isInside(width, height, point.x, point.y)) {
-      tiles[tileIndex(width, point.x, point.y)] = 'floor'
+    heatPenalty += heat[tileIndex(width, point.x, point.y)]
+  }
+  heatPenalty *= HEAT_WEIGHT
+
+  const bendPenalty = path.from.x !== path.to.x && path.from.y !== path.to.y ? BEND_WEIGHT : 0
+
+  let proximityPenalty = 0
+  for (const door of existingDoors) {
+    const distance = manhattan(path.bend, { x: door.x, y: door.y })
+    if (distance <= DOOR_PROXIMITY_RADIUS) {
+      proximityPenalty += (DOOR_PROXIMITY_RADIUS - distance + 1) * DOOR_PROXIMITY_WEIGHT
     }
   }
+
+  return heatPenalty + bendPenalty + proximityPenalty
 }
 
-function chooseDoorGate(path: EdgeCorridorPath): Point {
-  const count = path.points.length
-  if (count === 0) {
-    return path.bend
-  }
-  if (count <= 2) {
-    return path.points[Math.floor(count / 2)]
-  }
-  const middle = Math.floor(count / 2)
-  const clamped = clamp(middle, 1, count - 2)
-  return path.points[clamped]
+function selectCorridorPath(
+  from: Point,
+  to: Point,
+  heat: number[],
+  width: number,
+  existingDoors: DoorPoint[],
+): EdgeCorridorPath {
+  const candidates = buildCorridorPathCandidates(from, to)
+  const scored = candidates.map((path) => ({
+    path,
+    score: scoreCorridorPath(path, heat, width, existingDoors),
+  }))
+
+  scored.sort((a, b) => {
+    if (a.score !== b.score) {
+      return a.score - b.score
+    }
+    if (a.path.bend.x !== b.path.bend.x) {
+      return a.path.bend.x - b.path.bend.x
+    }
+    if (a.path.bend.y !== b.path.bend.y) {
+      return a.path.bend.y - b.path.bend.y
+    }
+    return a.path.points.length - b.path.points.length
+  })
+
+  return scored[0].path
 }
 
-function isPathGate(door: Point, roomA: RoomRect | undefined, roomB: RoomRect | undefined): boolean {
-  if (roomA && isInsideRoomInterior(door, roomA)) {
-    return false
+function carveCorridor(tiles: TileType[], heat: number[], width: number, height: number, path: EdgeCorridorPath): void {
+  for (const point of path.points) {
+    if (!isInside(width, height, point.x, point.y)) {
+      continue
+    }
+    const index = tileIndex(width, point.x, point.y)
+    tiles[index] = 'floor'
+    heat[index] += 1
   }
-  if (roomB && isInsideRoomInterior(door, roomB)) {
-    return false
-  }
-  return true
 }
 
-function appendDoor(
-  doors: DoorPoint[],
-  doorSet: Set<string>,
+function pickBoundaryDoor(
   roomA: RoomRect,
   roomB: RoomRect,
-  door: Point,
-): void {
-  const key = `${door.x},${door.y}`
+  placementA: DoorPlacement,
+  placementB: DoorPlacement,
+  usageByRoom: Map<string, Record<DoorSide, number>>,
+): { selected: DoorPlacement; room: RoomRect } {
+  const usageA = totalDoorUsage(getDoorUsageRecord(usageByRoom, roomA.id))
+  const usageB = totalDoorUsage(getDoorUsageRecord(usageByRoom, roomB.id))
+  if (usageA < usageB) {
+    return { selected: placementA, room: roomA }
+  }
+  if (usageB < usageA) {
+    return { selected: placementB, room: roomB }
+  }
+  if (roomA.id <= roomB.id) {
+    return { selected: placementA, room: roomA }
+  }
+  return { selected: placementB, room: roomB }
+}
+
+function appendDoor(doors: DoorPoint[], doorSet: Set<string>, roomA: RoomRect, roomB: RoomRect, point: Point): void {
+  const key = `${point.x},${point.y}`
   if (doorSet.has(key)) {
     return
   }
-  doors.push({ x: door.x, y: door.y, roomA: roomA.id, roomB: roomB.id })
+  doors.push({ x: point.x, y: point.y, roomA: roomA.id, roomB: roomB.id })
   doorSet.add(key)
 }
 
@@ -388,9 +473,9 @@ function addWalls(tiles: TileType[], width: number, height: number): TileType[] 
         if (!isInside(width, height, nx, ny)) {
           continue
         }
-        const neighborIndex = tileIndex(width, nx, ny)
-        if (result[neighborIndex] === 'void') {
-          result[neighborIndex] = 'wall'
+        const nIndex = tileIndex(width, nx, ny)
+        if (result[nIndex] === 'void') {
+          result[nIndex] = 'wall'
         }
       }
     }
@@ -411,6 +496,7 @@ export function buildTilemapFromDungeon(dungeon: Dungeon, options: TilemapBuildO
   const rng = createRng(rngSeed)
   const range = findNodeRange(dungeon)
   const tiles: TileType[] = new Array(width * height).fill('void')
+  const heat: number[] = new Array(width * height).fill(0)
   const rooms: RoomRect[] = []
   const roomById = new Map<string, RoomRect>()
 
@@ -447,15 +533,15 @@ export function buildTilemapFromDungeon(dungeon: Dungeon, options: TilemapBuildO
     const centerB = findCenter(roomB)
     const sideA = chooseDoorSide(roomA, centerB)
     const sideB = chooseDoorSide(roomB, centerA)
-    const a = createDoorAndOutside(roomA, sideA, getNextDoorSlot(doorUsageByRoom, roomA.id, sideA))
-    const b = createDoorAndOutside(roomB, sideB, getNextDoorSlot(doorUsageByRoom, roomB.id, sideB))
-    const path = buildCorridorPath(a.outside, b.outside)
-    const gate = chooseDoorGate(path)
-    const gateInsideRoom = isInsideRoomInterior(gate, roomA) || isInsideRoomInterior(gate, roomB)
-    const doorPoint = gateInsideRoom ? a.door : gate
+    const placementA = createDoorAndOutside(roomA, sideA, peekDoorSlot(doorUsageByRoom, roomA.id, sideA))
+    const placementB = createDoorAndOutside(roomB, sideB, peekDoorSlot(doorUsageByRoom, roomB.id, sideB))
 
-    carveCorridor(tiles, width, height, path)
-    appendDoor(doors, doorSet, roomA, roomB, doorPoint)
+    const path = selectCorridorPath(placementA.outside, placementB.outside, heat, width, doors)
+    carveCorridor(tiles, heat, width, height, path)
+
+    const chosen = pickBoundaryDoor(roomA, roomB, placementA, placementB, doorUsageByRoom)
+    commitDoorSlot(doorUsageByRoom, chosen.room.id, chosen.selected.side)
+    appendDoor(doors, doorSet, roomA, roomB, chosen.selected.door)
   }
 
   const finalized = addWalls(tiles, width, height)
@@ -489,10 +575,7 @@ function isPassable(tile: TileType): boolean {
   return tile === 'floor' || tile === 'door'
 }
 
-function bfsPassable(
-  tilemap: Tilemap,
-  start: Point,
-): { distance: Map<number, number>; visited: Set<number> } {
+function bfsPassable(tilemap: Tilemap, start: Point): { distance: Map<number, number>; visited: Set<number> } {
   const distance = new Map<number, number>()
   const visited = new Set<number>()
   const startIndex = tileIndex(tilemap.width, start.x, start.y)
@@ -519,7 +602,6 @@ function bfsPassable(
     const x = index % tilemap.width
     const y = Math.floor(index / tilemap.width)
     const dist = distance.get(index) ?? 0
-
     for (const dir of dirs) {
       const nx = x + dir.x
       const ny = y + dir.y
@@ -579,14 +661,16 @@ export function validateTilemap(tilemap: Tilemap): TilemapValidationResult {
     { x: 0, y: 1 },
     { x: -1, y: 0 },
   ]
+
   for (const door of tilemap.doors) {
     if (!isInside(tilemap.width, tilemap.height, door.x, door.y)) {
       issues.push({
         code: 'DOOR_OUT_OF_BOUNDS',
-        message: `Door ${door.x},${door.y} is outside the tilemap bounds.`,
+        message: `Door ${door.x},${door.y} is outside tilemap bounds.`,
       })
       continue
     }
+
     const doorTile = tilemap.tiles[tileIndex(tilemap.width, door.x, door.y)]
     if (doorTile !== 'door') {
       issues.push({
@@ -594,29 +678,53 @@ export function validateTilemap(tilemap: Tilemap): TilemapValidationResult {
         message: `Door ${door.x},${door.y} is not marked as door tile.`,
       })
     }
+
+    const roomA = tilemap.rooms.find((room) => room.id === door.roomA)
+    const roomB = tilemap.rooms.find((room) => room.id === door.roomB)
+
+    const onBoundary = (roomA && isDoorOnRoomBoundary(door, roomA)) || (roomB && isDoorOnRoomBoundary(door, roomB))
+    if (!onBoundary) {
+      issues.push({
+        code: 'DOOR_NOT_ON_ROOM_BOUNDARY',
+        message: `Door ${door.x},${door.y} is not on room boundary.`,
+      })
+    }
+
+    if ((roomA && isInsideRoomInterior(door, roomA)) || (roomB && isInsideRoomInterior(door, roomB))) {
+      issues.push({
+        code: 'DOOR_INTERIOR_INVALID',
+        message: `Door ${door.x},${door.y} is inside room interior.`,
+      })
+    }
+
     let passableNeighbors = 0
+    let connectedToRoom = false
+    let connectedToCorridor = false
     for (const dir of dirs) {
       const nx = door.x + dir.x
       const ny = door.y + dir.y
       if (!isInside(tilemap.width, tilemap.height, nx, ny)) {
         continue
       }
-      if (isPassable(tilemap.tiles[tileIndex(tilemap.width, nx, ny)])) {
-        passableNeighbors += 1
+      const nTile = tilemap.tiles[tileIndex(tilemap.width, nx, ny)]
+      if (!isPassable(nTile)) {
+        continue
+      }
+
+      passableNeighbors += 1
+      const point = { x: nx, y: ny }
+      const inRoomA = roomA ? isInsideRoomInterior(point, roomA) : false
+      const inRoomB = roomB ? isInsideRoomInterior(point, roomB) : false
+      if (inRoomA || inRoomB) {
+        connectedToRoom = true
+      } else {
+        connectedToCorridor = true
       }
     }
-    if (passableNeighbors < 2) {
+    if (passableNeighbors < 2 || !connectedToRoom || !connectedToCorridor) {
       issues.push({
-        code: 'DOOR_ISOLATED',
-        message: `Door ${door.x},${door.y} does not connect enough passable neighbors.`,
-      })
-    }
-    const roomA = tilemap.rooms.find((room) => room.id === door.roomA)
-    const roomB = tilemap.rooms.find((room) => room.id === door.roomB)
-    if (!isPathGate(door, roomA, roomB)) {
-      issues.push({
-        code: 'DOOR_NOT_ON_PATH_GATE',
-        message: `Door ${door.x},${door.y} is placed inside room interior.`,
+        code: 'DOOR_CONNECTIVITY_INVALID',
+        message: `Door ${door.x},${door.y} does not bridge room and corridor correctly.`,
       })
     }
   }
@@ -641,3 +749,4 @@ export function validateTilemap(tilemap: Tilemap): TilemapValidationResult {
     },
   }
 }
+

@@ -139,38 +139,41 @@ function drawDoorOverlay(
   y: number,
   size: number,
 ): void {
-  const inset = Math.max(1, Math.floor(size * 0.16))
+  const glyphSize = Math.max(6, size)
+  const inset = Math.max(1, Math.floor(glyphSize * 0.16))
   const frame = '#1b120d'
   const plank = '#d1965a'
   const highlight = '#ffe0ad'
   const shadow = '#6e482a'
 
   context.fillStyle = 'rgba(0, 0, 0, 0.42)'
-  context.fillRect(x + 1, y + 1, size, size)
+  context.fillRect(x + 1, y + 1, glyphSize, glyphSize)
 
   context.fillStyle = frame
-  context.fillRect(x, y, size, size)
+  context.fillRect(x, y, glyphSize, glyphSize)
   context.fillStyle = plank
-  context.fillRect(x + inset, y + inset, size - inset * 2, size - inset * 2)
+  context.fillRect(x + inset, y + inset, glyphSize - inset * 2, glyphSize - inset * 2)
   context.strokeStyle = highlight
   context.lineWidth = 1
-  context.strokeRect(x + inset, y + inset, size - inset * 2, size - inset * 2)
+  context.strokeRect(x + inset, y + inset, glyphSize - inset * 2, glyphSize - inset * 2)
+  context.strokeStyle = 'rgba(0, 0, 0, 0.9)'
+  context.strokeRect(x + 0.5, y + 0.5, glyphSize - 1, glyphSize - 1)
 
   context.fillStyle = shadow
   if (orientation === 'vertical') {
-    const mid = x + Math.floor(size / 2)
-    context.fillRect(mid - 1, y + inset, 2, size - inset * 2)
+    const mid = x + Math.floor(glyphSize / 2)
+    context.fillRect(mid - 1, y + inset, 2, glyphSize - inset * 2)
   } else if (orientation === 'horizontal') {
-    const mid = y + Math.floor(size / 2)
-    context.fillRect(x + inset, mid - 1, size - inset * 2, 2)
+    const mid = y + Math.floor(glyphSize / 2)
+    context.fillRect(x + inset, mid - 1, glyphSize - inset * 2, 2)
   } else {
-    context.fillRect(x + inset + 1, y + inset + 1, Math.max(1, size - inset * 2 - 2), 2)
-    context.fillRect(x + inset + 1, y + size - inset - 3, Math.max(1, size - inset * 2 - 2), 2)
+    context.fillRect(x + inset + 1, y + inset + 1, Math.max(1, glyphSize - inset * 2 - 2), 2)
+    context.fillRect(x + inset + 1, y + glyphSize - inset - 3, Math.max(1, glyphSize - inset * 2 - 2), 2)
   }
 
   context.fillStyle = highlight
-  const knob = Math.max(1, Math.floor(size * 0.14))
-  context.fillRect(x + size - inset - knob - 1, y + Math.floor(size / 2), knob, knob)
+  const knob = Math.max(1, Math.floor(glyphSize * 0.14))
+  context.fillRect(x + glyphSize - inset - knob - 1, y + Math.floor(glyphSize / 2), knob, knob)
 }
 
 function drawMarkerRing(

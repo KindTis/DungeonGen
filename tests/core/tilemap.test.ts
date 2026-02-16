@@ -72,9 +72,24 @@ describe('tilemap conversion', () => {
     expect(tilemap.doors.length).toBe(tilemap.meta.edgeCount)
   })
 
-  it('places doors on corridor gates (not room interiors)', () => {
+  it('places doors on connected room boundaries', () => {
     const tilemap = buildSampleTilemap(123456)
     const roomById = new Map(tilemap.rooms.map((room) => [room.id, room]))
+
+    const isOnBoundary = (
+      door: { x: number; y: number },
+      room: { x: number; y: number; w: number; h: number },
+    ) => {
+      const onVertical =
+        (door.x === room.x || door.x === room.x + room.w - 1) &&
+        door.y >= room.y &&
+        door.y < room.y + room.h
+      const onHorizontal =
+        (door.y === room.y || door.y === room.y + room.h - 1) &&
+        door.x >= room.x &&
+        door.x < room.x + room.w
+      return onVertical || onHorizontal
+    }
 
     const isInsideInterior = (
       door: { x: number; y: number },
@@ -94,6 +109,7 @@ describe('tilemap conversion', () => {
       expect(roomA).toBeTruthy()
       expect(roomB).toBeTruthy()
       if (roomA) {
+        expect(isOnBoundary(door, roomA) || (roomB ? isOnBoundary(door, roomB) : false)).toBe(true)
         expect(isInsideInterior(door, roomA)).toBe(false)
       }
       if (roomB) {
@@ -104,11 +120,28 @@ describe('tilemap conversion', () => {
 
   it('reports a mismatch when door count differs from edge count', () => {
     const tilemap = buildSampleTilemap(2027)
+    const firstNonDoor = tilemap.tiles.findIndex((tile) => tile !== 'door')
+    expect(firstNonDoor).toBeGreaterThanOrEqual(0)
     const corrupted = {
       ...tilemap,
-      tiles: tilemap.tiles.map((tile, index) => (index === 0 ? 'door' : tile)),
+      tiles: tilemap.tiles.map((tile, index) => (index === firstNonDoor ? 'door' : tile)),
     }
     const validation = validateTilemap(corrupted)
     expect(validation.issues.some((issue) => issue.code === 'DOOR_COUNT_MISMATCH')).toBe(true)
+  })
+
+  it('reports boundary violations for off-boundary doors', () => {
+    const tilemap = buildSampleTilemap(88)
+    const badDoor = {
+      ...tilemap.doors[0],
+      x: tilemap.rooms[0].x + 2,
+      y: tilemap.rooms[0].y + 2,
+    }
+    const corrupted = {
+      ...tilemap,
+      doors: [badDoor, ...tilemap.doors.slice(1)],
+    }
+    const validation = validateTilemap(corrupted)
+    expect(validation.issues.some((issue) => issue.code === 'DOOR_NOT_ON_ROOM_BOUNDARY')).toBe(true)
   })
 })
