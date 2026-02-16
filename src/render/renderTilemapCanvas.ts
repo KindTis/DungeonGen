@@ -139,11 +139,14 @@ function drawDoorOverlay(
   y: number,
   size: number,
 ): void {
-  const inset = Math.max(1, Math.floor(size * 0.18))
-  const frame = '#2a1b12'
-  const plank = '#c18a52'
-  const highlight = '#ffd79a'
-  const shadow = '#6c472b'
+  const inset = Math.max(1, Math.floor(size * 0.16))
+  const frame = '#1b120d'
+  const plank = '#d1965a'
+  const highlight = '#ffe0ad'
+  const shadow = '#6e482a'
+
+  context.fillStyle = 'rgba(0, 0, 0, 0.42)'
+  context.fillRect(x + 1, y + 1, size, size)
 
   context.fillStyle = frame
   context.fillRect(x, y, size, size)
@@ -166,8 +169,27 @@ function drawDoorOverlay(
   }
 
   context.fillStyle = highlight
-  const knob = Math.max(1, Math.floor(size * 0.12))
+  const knob = Math.max(1, Math.floor(size * 0.14))
   context.fillRect(x + size - inset - knob - 1, y + Math.floor(size / 2), knob, knob)
+}
+
+function drawMarkerRing(
+  context: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  size: number,
+  kind: 'start' | 'boss',
+): void {
+  const radius = Math.max(6, size * 0.6)
+  context.save()
+  context.beginPath()
+  context.arc(x, y, radius, 0, Math.PI * 2)
+  context.fillStyle = kind === 'start' ? 'rgba(72, 220, 166, 0.24)' : 'rgba(231, 88, 116, 0.26)'
+  context.fill()
+  context.lineWidth = Math.max(1, Math.floor(size * 0.1))
+  context.strokeStyle = kind === 'start' ? 'rgba(104, 255, 197, 0.95)' : 'rgba(255, 149, 171, 0.95)'
+  context.stroke()
+  context.restore()
 }
 
 export function renderTilemapToCanvas(
@@ -224,9 +246,9 @@ export function renderTilemapToCanvas(
 
   const startRoom = tilemap.rooms.find((room) => room.id === tilemap.startRoomId)
   const bossRoom = tilemap.rooms.find((room) => room.id === tilemap.bossRoomId)
-  const markers = [
-    { room: startRoom, image: sprites?.start },
-    { room: bossRoom, image: sprites?.boss },
+  const markers: Array<{ room: typeof startRoom; image?: TileSprites['start']; kind: 'start' | 'boss' }> = [
+    { room: startRoom, image: sprites?.start, kind: 'start' },
+    { room: bossRoom, image: sprites?.boss, kind: 'boss' },
   ]
 
   for (const marker of markers) {
@@ -237,7 +259,8 @@ export function renderTilemapToCanvas(
     const centerY = marker.room.y + Math.floor(marker.room.h / 2)
     const px = originX + centerX * drawTileSize
     const py = originY + centerY * drawTileSize
-    const markerSize = Math.max(10, Math.floor(drawTileSize * 1.2))
+    const markerSize = Math.max(12, Math.floor(drawTileSize * 1.8))
+    drawMarkerRing(context, px, py, markerSize, marker.kind)
     context.drawImage(
       marker.image,
       Math.floor(px - markerSize / 2),
