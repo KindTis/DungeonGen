@@ -38,10 +38,11 @@
 .canvas {
   width: min(100%, 1200px);
   height: auto;
+  image-rendering: pixelated;
   border-radius: 14px;
   border: 1px solid rgba(216, 235, 255, 0.24);
   box-shadow: 0 16px 60px rgba(8, 12, 18, 0.45);
-  background: linear-gradient(180deg, #0f2237 0%, #122942 100%);
+  background: #0f1218;
 }
 
 @media (max-width: 1024px) {
@@ -54,4 +55,3 @@
     border-bottom: 1px solid rgba(184, 210, 240, 0.2);
   }
 }
-
