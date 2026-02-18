@@ -758,6 +758,11 @@ export function buildTilemapFromDungeon(dungeon: Dungeon, options: TilemapBuildO
     appendDoor(doors, doorSet, doorB)
   }
 
+  for (const door of doors) {
+    if (isInside(width, height, door.x, door.y)) {
+      tiles[tileIndex(width, door.x, door.y)] = 'door'
+    }
+  }
   const finalized = addWalls(tiles, width, height)
   for (const door of doors) {
     if (isInside(width, height, door.x, door.y)) {
@@ -847,6 +852,19 @@ function sideDelta(side: DoorSide): Point {
     return { x: -1, y: 0 }
   }
   return { x: 1, y: 0 }
+}
+
+function sideFrameNeighbors(door: DoorPoint): Point[] {
+  if (door.side === 'north' || door.side === 'south') {
+    return [
+      { x: door.x - 1, y: door.y },
+      { x: door.x + 1, y: door.y },
+    ]
+  }
+  return [
+    { x: door.x, y: door.y - 1 },
+    { x: door.x, y: door.y + 1 },
+  ]
 }
 
 export function validateTilemap(tilemap: Tilemap): TilemapValidationResult {
@@ -963,6 +981,23 @@ export function validateTilemap(tilemap: Tilemap): TilemapValidationResult {
         issues.push({
           code: 'DOOR_CONNECTIVITY_INVALID',
           message: `Door ${door.x},${door.y} does not connect to room interior.`,
+        })
+      }
+    }
+
+    for (const frame of sideFrameNeighbors(door)) {
+      if (!isInside(tilemap.width, tilemap.height, frame.x, frame.y)) {
+        issues.push({
+          code: 'DOOR_SIDE_NOT_WALL',
+          message: `Door ${door.x},${door.y} has out-of-bounds side frame at ${frame.x},${frame.y}.`,
+        })
+        continue
+      }
+      const frameTile = tilemap.tiles[tileIndex(tilemap.width, frame.x, frame.y)]
+      if (frameTile !== 'wall') {
+        issues.push({
+          code: 'DOOR_SIDE_NOT_WALL',
+          message: `Door ${door.x},${door.y} side frame at ${frame.x},${frame.y} is ${frameTile}.`,
         })
       }
     }

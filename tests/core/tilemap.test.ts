@@ -15,6 +15,19 @@ function hashTiles(tiles: string[]): string {
   return (hash >>> 0).toString(16)
 }
 
+function sideFrameNeighbors(door: { x: number; y: number; side: 'north' | 'east' | 'south' | 'west' }) {
+  if (door.side === 'north' || door.side === 'south') {
+    return [
+      { x: door.x - 1, y: door.y },
+      { x: door.x + 1, y: door.y },
+    ]
+  }
+  return [
+    { x: door.x, y: door.y - 1 },
+    { x: door.x, y: door.y + 1 },
+  ]
+}
+
 function buildSampleTilemap(seed: number) {
   const params = {
     roomCount: 44,
@@ -146,6 +159,33 @@ describe('tilemap conversion', () => {
         expect(tileAt(room.x + room.w - 1, y)).not.toBe('floor')
       }
     }
+  })
+
+  it('keeps wall frame on both sides of every door', () => {
+    const tilemap = buildSampleTilemap(123456)
+    const tileAt = (x: number, y: number) => tilemap.tiles[y * tilemap.width + x]
+    for (const door of tilemap.doors) {
+      for (const frame of sideFrameNeighbors(door)) {
+        expect(frame.x).toBeGreaterThanOrEqual(0)
+        expect(frame.y).toBeGreaterThanOrEqual(0)
+        expect(frame.x).toBeLessThan(tilemap.width)
+        expect(frame.y).toBeLessThan(tilemap.height)
+        expect(tileAt(frame.x, frame.y)).toBe('wall')
+      }
+    }
+  })
+
+  it('reports door-side wall violations', () => {
+    const tilemap = buildSampleTilemap(9876)
+    const door = tilemap.doors[0]
+    const frame = sideFrameNeighbors(door)[0]
+    const index = frame.y * tilemap.width + frame.x
+    const corrupted = {
+      ...tilemap,
+      tiles: tilemap.tiles.map((tile, i) => (i === index ? 'void' : tile)),
+    }
+    const validation = validateTilemap(corrupted)
+    expect(validation.issues.some((issue) => issue.code === 'DOOR_SIDE_NOT_WALL')).toBe(true)
   })
 
   it('reports a mismatch when door count differs from expected pair count', () => {
