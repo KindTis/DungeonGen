@@ -67,14 +67,27 @@ describe('tilemap conversion', () => {
     expect(validation.stats.startBossDistance).toBeGreaterThan(0)
   })
 
-  it('creates one door per edge', () => {
+  it('creates two doors per edge', () => {
     const tilemap = buildSampleTilemap(123456)
-    expect(tilemap.doors.length).toBe(tilemap.meta.edgeCount)
+    expect(tilemap.meta.doorCountExpected).toBe(tilemap.meta.edgeCount * 2)
+    expect(tilemap.doors.length).toBe(tilemap.meta.doorCountExpected)
   })
 
-  it('places doors on connected room boundaries', () => {
+  it('places doors on room boundaries with consistent throat metadata', () => {
     const tilemap = buildSampleTilemap(123456)
     const roomById = new Map(tilemap.rooms.map((room) => [room.id, room]))
+    const sideDelta = (side: 'north' | 'east' | 'south' | 'west') => {
+      if (side === 'north') {
+        return { x: 0, y: -1 }
+      }
+      if (side === 'south') {
+        return { x: 0, y: 1 }
+      }
+      if (side === 'west') {
+        return { x: -1, y: 0 }
+      }
+      return { x: 1, y: 0 }
+    }
 
     const isOnBoundary = (
       door: { x: number; y: number },
@@ -105,20 +118,37 @@ describe('tilemap conversion', () => {
 
     for (const door of tilemap.doors) {
       const roomA = roomById.get(door.roomA)
-      const roomB = roomById.get(door.roomB)
       expect(roomA).toBeTruthy()
-      expect(roomB).toBeTruthy()
       if (roomA) {
-        expect(isOnBoundary(door, roomA) || (roomB ? isOnBoundary(door, roomB) : false)).toBe(true)
+        expect(isOnBoundary(door, roomA)).toBe(true)
         expect(isInsideInterior(door, roomA)).toBe(false)
-      }
-      if (roomB) {
-        expect(isInsideInterior(door, roomB)).toBe(false)
+        const delta = sideDelta(door.side)
+        expect(door.throatX).toBe(door.x + delta.x)
+        expect(door.throatY).toBe(door.y + delta.y)
+        const throatIndex = door.throatY * tilemap.width + door.throatX
+        const throatTile = tilemap.tiles[throatIndex]
+        expect(throatTile === 'floor' || throatTile === 'door').toBe(true)
       }
     }
   })
 
-  it('reports a mismatch when door count differs from edge count', () => {
+  it('keeps room boundary openings single-tile wide', () => {
+    const tilemap = buildSampleTilemap(123456)
+    const tileAt = (x: number, y: number) => tilemap.tiles[y * tilemap.width + x]
+
+    for (const room of tilemap.rooms) {
+      for (let x = room.x + 1; x < room.x + room.w - 1; x += 1) {
+        expect(tileAt(x, room.y)).not.toBe('floor')
+        expect(tileAt(x, room.y + room.h - 1)).not.toBe('floor')
+      }
+      for (let y = room.y + 1; y < room.y + room.h - 1; y += 1) {
+        expect(tileAt(room.x, y)).not.toBe('floor')
+        expect(tileAt(room.x + room.w - 1, y)).not.toBe('floor')
+      }
+    }
+  })
+
+  it('reports a mismatch when door count differs from expected pair count', () => {
     const tilemap = buildSampleTilemap(2027)
     const firstNonDoor = tilemap.tiles.findIndex((tile) => tile !== 'door')
     expect(firstNonDoor).toBeGreaterThanOrEqual(0)
