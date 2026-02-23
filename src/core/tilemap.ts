@@ -2,6 +2,8 @@ import type { Dungeon, RoomType } from './model'
 import { createRng } from './rng'
 
 export type TileType = 'void' | 'floor' | 'wall' | 'door'
+export type PropKind = 'crate' | 'barrel' | 'bones' | 'pillar' | 'rubble' | 'banner' | 'chest'
+export type LightKind = 'torch' | 'brazier' | 'flame-small'
 
 export interface RoomRect {
   id: string
@@ -25,6 +27,21 @@ export interface DoorPoint {
   edgeKey: string
 }
 
+export interface PropInstance {
+  x: number
+  y: number
+  kind: PropKind
+  roomId: string
+}
+
+export interface LightInstance {
+  x: number
+  y: number
+  kind: LightKind
+  intensity: number
+  radius: number
+}
+
 export interface Tilemap {
   width: number
   height: number
@@ -32,6 +49,8 @@ export interface Tilemap {
   tiles: TileType[]
   rooms: RoomRect[]
   doors: DoorPoint[]
+  props: PropInstance[]
+  lights: LightInstance[]
   startRoomId: string
   bossRoomId: string
   meta: {
@@ -73,11 +92,13 @@ export interface TilemapValidationResult {
   stats: TilemapStats
 }
 
-const TILEMAP_VERSION = 'tilemap-mvp-3'
+const TILEMAP_VERSION = 'tilemap-mvp-4-visual'
 const HEAT_WEIGHT = 1.0
 const BEND_WEIGHT = 2
 const DOOR_PROXIMITY_RADIUS = 4
 const DOOR_PROXIMITY_WEIGHT = 6
+const PROP_SPACING_MANHATTAN = 3
+const PROP_DENSITY_DIVISOR = 28
 
 interface Point {
   x: number
@@ -669,6 +690,159 @@ function addWalls(tiles: TileType[], width: number, height: number): TileType[] 
   return result
 }
 
+function pointKey(x: number, y: number): string {
+  return `${x},${y}`
+}
+
+function isRoomInteriorPoint(room: RoomRect, point: Point): boolean {
+  return (
+    point.x > room.x &&
+    point.x < room.x + room.w - 1 &&
+    point.y > room.y &&
+    point.y < room.y + room.h - 1
+  )
+}
+
+function reserveAroundPoint(reserved: Set<string>, center: Point, radius: number, width: number, height: number): void {
+  for (let y = center.y - radius; y <= center.y + radius; y += 1) {
+    for (let x = center.x - radius; x <= center.x + radius; x += 1) {
+      if (!isInside(width, height, x, y)) {
+        continue
+      }
+      if (Math.abs(x - center.x) + Math.abs(y - center.y) > radius) {
+        continue
+      }
+      reserved.add(pointKey(x, y))
+    }
+  }
+}
+
+function pickWeighted<T extends string>(entries: Array<{ value: T; weight: number }>, next: () => number): T {
+  const total = entries.reduce((sum, entry) => sum + entry.weight, 0)
+  if (total <= 0) {
+    return entries[0].value
+  }
+  let cursor = next() * total
+  for (const entry of entries) {
+    cursor -= entry.weight
+    if (cursor <= 0) {
+      return entry.value
+    }
+  }
+  return entries[entries.length - 1].value
+}
+
+function pickRoomDecorSpot(
+  room: RoomRect,
+  tiles: TileType[],
+  width: number,
+  height: number,
+  reserved: Set<string>,
+  nextInt: (maxExclusive: number) => number,
+): Point | null {
+  const candidates: Point[] = []
+  for (let y = room.y + 1; y < room.y + room.h - 1; y += 1) {
+    for (let x = room.x + 1; x < room.x + room.w - 1; x += 1) {
+      if (!isInside(width, height, x, y)) {
+        continue
+      }
+      if (tiles[tileIndex(width, x, y)] !== 'floor') {
+        continue
+      }
+      if (reserved.has(pointKey(x, y))) {
+        continue
+      }
+      candidates.push({ x, y })
+    }
+  }
+  if (candidates.length === 0) {
+    return null
+  }
+  return candidates[nextInt(candidates.length)]
+}
+
+function generateDecorations(
+  rooms: RoomRect[],
+  doors: DoorPoint[],
+  tiles: TileType[],
+  width: number,
+  height: number,
+  rngSeed: number,
+): { props: PropInstance[]; lights: LightInstance[] } {
+  const rng = createRng(rngSeed ^ 0x31d8f5a1)
+  const reserved = new Set<string>()
+  const props: PropInstance[] = []
+  const lights: LightInstance[] = []
+
+  for (const door of doors) {
+    reserveAroundPoint(reserved, { x: door.x, y: door.y }, 1, width, height)
+    reserveAroundPoint(reserved, { x: door.throatX, y: door.throatY }, 1, width, height)
+  }
+
+  const propWeights: Array<{ value: PropKind; weight: number }> = [
+    { value: 'crate', weight: 24 },
+    { value: 'barrel', weight: 18 },
+    { value: 'rubble', weight: 20 },
+    { value: 'bones', weight: 12 },
+    { value: 'pillar', weight: 10 },
+    { value: 'banner', weight: 8 },
+    { value: 'chest', weight: 3 },
+  ]
+
+  for (const room of rooms) {
+    const interiorArea = Math.max(0, room.w - 2) * Math.max(0, room.h - 2)
+    if (interiorArea <= 0) {
+      continue
+    }
+
+    const slotCount = Math.max(1, Math.floor(interiorArea / PROP_DENSITY_DIVISOR))
+    for (let i = 0; i < slotCount; i += 1) {
+      const spot = pickRoomDecorSpot(room, tiles, width, height, reserved, rng.nextInt)
+      if (!spot) {
+        break
+      }
+      props.push({
+        x: spot.x,
+        y: spot.y,
+        kind: pickWeighted(propWeights, rng.next),
+        roomId: room.id,
+      })
+      reserveAroundPoint(reserved, spot, PROP_SPACING_MANHATTAN - 1, width, height)
+    }
+
+    let lightChance = 0.35
+    if (room.type === 'boss') {
+      lightChance = 0.95
+    } else if (room.type === 'start') {
+      lightChance = 0.7
+    } else if (interiorArea > 36) {
+      lightChance = 0.55
+    }
+
+    if (rng.next() > lightChance) {
+      continue
+    }
+
+    const lightSpot = pickRoomDecorSpot(room, tiles, width, height, reserved, rng.nextInt)
+    if (!lightSpot) {
+      continue
+    }
+    const lightKind = room.type === 'boss' ? 'brazier' : rng.next() < 0.7 ? 'torch' : 'flame-small'
+    const radius = lightKind === 'brazier' ? 3.8 : lightKind === 'torch' ? 3.2 : 2.8
+    const intensity = lightKind === 'brazier' ? 0.42 : lightKind === 'torch' ? 0.36 : 0.3
+    lights.push({
+      x: lightSpot.x,
+      y: lightSpot.y,
+      kind: lightKind,
+      radius,
+      intensity,
+    })
+    reserveAroundPoint(reserved, lightSpot, 2, width, height)
+  }
+
+  return { props, lights }
+}
+
 export function buildTilemapFromDungeon(dungeon: Dungeon, options: TilemapBuildOptions): Tilemap {
   const width = options.width
   const height = options.height
@@ -769,6 +943,7 @@ export function buildTilemapFromDungeon(dungeon: Dungeon, options: TilemapBuildO
       finalized[tileIndex(width, door.x, door.y)] = 'door'
     }
   }
+  const decorations = generateDecorations(rooms, doors, finalized, width, height, rngSeed)
 
   const startRoom = rooms.find((room) => room.type === 'start')
   const bossRoom = rooms.find((room) => room.type === 'boss')
@@ -780,6 +955,8 @@ export function buildTilemapFromDungeon(dungeon: Dungeon, options: TilemapBuildO
     tiles: finalized,
     rooms,
     doors,
+    props: decorations.props,
+    lights: decorations.lights,
     startRoomId: startRoom?.id ?? '',
     bossRoomId: bossRoom?.id ?? '',
     meta: {
@@ -1003,6 +1180,60 @@ export function validateTilemap(tilemap: Tilemap): TilemapValidationResult {
     }
 
     edgeDoorCounter.set(door.edgeKey, (edgeDoorCounter.get(door.edgeKey) ?? 0) + 1)
+  }
+
+  for (const prop of tilemap.props) {
+    if (!isInside(tilemap.width, tilemap.height, prop.x, prop.y)) {
+      issues.push({
+        code: 'PROP_OUT_OF_BOUNDS',
+        message: `Prop ${prop.kind} at ${prop.x},${prop.y} is outside tilemap bounds.`,
+      })
+      continue
+    }
+    const room = roomById.get(prop.roomId)
+    if (!room) {
+      issues.push({
+        code: 'PROP_ROOM_NOT_FOUND',
+        message: `Prop ${prop.kind} at ${prop.x},${prop.y} references missing room ${prop.roomId}.`,
+      })
+      continue
+    }
+    if (!isRoomInteriorPoint(room, { x: prop.x, y: prop.y })) {
+      issues.push({
+        code: 'PROP_NOT_IN_ROOM_INTERIOR',
+        message: `Prop ${prop.kind} at ${prop.x},${prop.y} is not inside room interior.`,
+      })
+    }
+    const tile = tilemap.tiles[tileIndex(tilemap.width, prop.x, prop.y)]
+    if (tile !== 'floor') {
+      issues.push({
+        code: 'PROP_TILE_INVALID',
+        message: `Prop ${prop.kind} at ${prop.x},${prop.y} is on ${tile} tile.`,
+      })
+    }
+  }
+
+  for (const light of tilemap.lights) {
+    if (!isInside(tilemap.width, tilemap.height, light.x, light.y)) {
+      issues.push({
+        code: 'LIGHT_OUT_OF_BOUNDS',
+        message: `Light ${light.kind} at ${light.x},${light.y} is outside tilemap bounds.`,
+      })
+      continue
+    }
+    const tile = tilemap.tiles[tileIndex(tilemap.width, light.x, light.y)]
+    if (tile !== 'floor') {
+      issues.push({
+        code: 'LIGHT_TILE_INVALID',
+        message: `Light ${light.kind} at ${light.x},${light.y} is on ${tile} tile.`,
+      })
+    }
+    if (light.radius <= 0 || light.intensity <= 0) {
+      issues.push({
+        code: 'LIGHT_PARAMS_INVALID',
+        message: `Light ${light.kind} at ${light.x},${light.y} has invalid radius/intensity.`,
+      })
+    }
   }
 
   for (const room of tilemap.rooms) {

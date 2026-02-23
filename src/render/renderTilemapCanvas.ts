@@ -1,4 +1,4 @@
-import type { TileSprites } from '../app/tileset'
+import type { TileSprites, WallVariantKey } from '../app/tileset'
 import type { TileType, Tilemap } from '../core/tilemap'
 
 type BackgroundMode = 'white' | 'transparent'
@@ -28,9 +28,9 @@ function isPassable(tile: TileType): boolean {
   return tile === 'floor' || tile === 'door'
 }
 
-function floorVariant(x: number, y: number, seed: number): 0 | 1 {
+function floorVariantIndex(x: number, y: number, seed: number, variantCount: number): number {
   const h = (x * 374761393 + y * 668265263 + seed * 982451653) >>> 0
-  return (h & 1) as 0 | 1
+  return variantCount <= 0 ? 0 : h % variantCount
 }
 
 function wallMask(tilemap: Tilemap, x: number, y: number): number {
@@ -54,7 +54,36 @@ function wallMask(tilemap: Tilemap, x: number, y: number): number {
   return mask
 }
 
-type DoorOrientation = 'vertical' | 'horizontal' | 'block'
+function bitCount(mask: number): number {
+  let value = mask
+  let count = 0
+  while (value > 0) {
+    count += value & 1
+    value >>= 1
+  }
+  return count
+}
+
+function wallVariant(mask: number): WallVariantKey {
+  const count = bitCount(mask)
+  if (count >= 3) {
+    return 'cap'
+  }
+  const hasNorth = (mask & 1) !== 0
+  const hasEast = (mask & 2) !== 0
+  const hasSouth = (mask & 4) !== 0
+  const hasWest = (mask & 8) !== 0
+  const corner = (hasNorth && hasEast) || (hasEast && hasSouth) || (hasSouth && hasWest) || (hasWest && hasNorth)
+  if (corner && count === 2) {
+    return 'innerCorner'
+  }
+  if (count === 1) {
+    return 'outerCorner'
+  }
+  return 'face'
+}
+
+type DoorOrientation = 'horizontal' | 'vertical' | 'block'
 
 function doorOrientation(tilemap: Tilemap, x: number, y: number): DoorOrientation {
   const left = isInside(tilemap, x - 1, y) && isPassable(tilemap.tiles[tileIndex(tilemap.width, x - 1, y)])
@@ -63,10 +92,10 @@ function doorOrientation(tilemap: Tilemap, x: number, y: number): DoorOrientatio
   const down = isInside(tilemap, x, y + 1) && isPassable(tilemap.tiles[tileIndex(tilemap.width, x, y + 1)])
 
   if (left && right && !up && !down) {
-    return 'vertical'
+    return 'horizontal'
   }
   if (up && down && !left && !right) {
-    return 'horizontal'
+    return 'vertical'
   }
   return 'block'
 }
@@ -132,6 +161,20 @@ function drawWallOverlay(
   }
 }
 
+function drawPropFallback(
+  context: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  size: number,
+): void {
+  const inset = Math.max(1, Math.floor(size * 0.22))
+  context.fillStyle = '#705846'
+  context.fillRect(x + inset, y + inset, size - inset * 2, size - inset * 2)
+  context.strokeStyle = '#2a211c'
+  context.lineWidth = 1
+  context.strokeRect(x + inset + 0.5, y + inset + 0.5, size - inset * 2 - 1, size - inset * 2 - 1)
+}
+
 function drawDoorOverlay(
   context: CanvasRenderingContext2D,
   orientation: DoorOrientation,
@@ -160,10 +203,10 @@ function drawDoorOverlay(
   context.strokeRect(x + 0.5, y + 0.5, glyphSize - 1, glyphSize - 1)
 
   context.fillStyle = shadow
-  if (orientation === 'vertical') {
+  if (orientation === 'horizontal') {
     const mid = x + Math.floor(glyphSize / 2)
     context.fillRect(mid - 1, y + inset, 2, glyphSize - inset * 2)
-  } else if (orientation === 'horizontal') {
+  } else if (orientation === 'vertical') {
     const mid = y + Math.floor(glyphSize / 2)
     context.fillRect(x + inset, mid - 1, glyphSize - inset * 2, 2)
   } else {
@@ -174,6 +217,41 @@ function drawDoorOverlay(
   context.fillStyle = highlight
   const knob = Math.max(1, Math.floor(glyphSize * 0.14))
   context.fillRect(x + glyphSize - inset - knob - 1, y + Math.floor(glyphSize / 2), knob, knob)
+}
+
+function drawLightGlow(
+  context: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  radius: number,
+  intensity: number,
+): void {
+  const gradient = context.createRadialGradient(x, y, 0, x, y, radius)
+  gradient.addColorStop(0, `rgba(255, 213, 140, ${Math.min(0.9, intensity + 0.25)})`)
+  gradient.addColorStop(0.5, `rgba(255, 175, 88, ${Math.min(0.55, intensity)})`)
+  gradient.addColorStop(1, 'rgba(255, 140, 48, 0)')
+  context.save()
+  context.globalCompositeOperation = 'lighter'
+  context.fillStyle = gradient
+  context.beginPath()
+  context.arc(x, y, radius, 0, Math.PI * 2)
+  context.fill()
+  context.restore()
+}
+
+function drawLightFallback(
+  context: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  size: number,
+): void {
+  const r = Math.max(1.5, size * 0.22)
+  context.save()
+  context.beginPath()
+  context.arc(x, y, r, 0, Math.PI * 2)
+  context.fillStyle = '#ffb35d'
+  context.fill()
+  context.restore()
 }
 
 function drawMarkerRing(
@@ -231,19 +309,57 @@ export function renderTilemapToCanvas(
       }
 
       if (tile === 'floor') {
-        const variant = floorVariant(x, y, tilemap.meta.seed)
-        const floorImage = variant === 0 ? sprites.floorA : sprites.floorB
+        const variant = floorVariantIndex(x, y, tilemap.meta.seed, sprites.floorVariants.length)
+        const floorImage = sprites.floorVariants[variant]
         context.drawImage(floorImage, px, py, drawTileSize, drawTileSize)
       } else if (tile === 'wall') {
-        context.drawImage(sprites.wall, px, py, drawTileSize, drawTileSize)
+        const mask = wallMask(tilemap, x, y)
+        const variantKey = wallVariant(mask)
+        context.drawImage(sprites.wallVariants[variantKey], px, py, drawTileSize, drawTileSize)
         drawWallOverlay(context, wallMask(tilemap, x, y), px, py, drawTileSize)
       } else if (tile === 'door') {
-        context.drawImage(sprites.door, px, py, drawTileSize, drawTileSize)
-        drawDoorOverlay(context, doorOrientation(tilemap, x, y), px, py, drawTileSize)
+        const orientation = doorOrientation(tilemap, x, y)
+        const doorSprite =
+          orientation === 'horizontal'
+            ? sprites.doorHorizontal
+            : orientation === 'vertical'
+              ? sprites.doorVertical
+              : sprites.doorFrame
+        context.drawImage(doorSprite, px, py, drawTileSize, drawTileSize)
+        drawDoorOverlay(context, orientation, px, py, drawTileSize)
       } else {
         context.fillStyle = '#0f131d'
         context.fillRect(px, py, drawTileSize, drawTileSize)
       }
+    }
+  }
+
+  for (const prop of tilemap.props) {
+    const px = originX + prop.x * drawTileSize
+    const py = originY + prop.y * drawTileSize
+    if (sprites) {
+      const image = sprites.props[prop.kind]
+      context.drawImage(image, px, py, drawTileSize, drawTileSize)
+    } else {
+      drawPropFallback(context, px, py, drawTileSize)
+    }
+  }
+
+  for (const light of tilemap.lights) {
+    const cx = originX + light.x * drawTileSize + Math.floor(drawTileSize / 2)
+    const cy = originY + light.y * drawTileSize + Math.floor(drawTileSize / 2)
+    const glowRadius = Math.max(drawTileSize * 1.4, drawTileSize * light.radius)
+    drawLightGlow(context, cx, cy, glowRadius, light.intensity)
+  }
+
+  for (const light of tilemap.lights) {
+    const px = originX + light.x * drawTileSize
+    const py = originY + light.y * drawTileSize
+    if (sprites) {
+      const image = sprites.lights[light.kind]
+      context.drawImage(image, px, py, drawTileSize, drawTileSize)
+    } else {
+      drawLightFallback(context, px + drawTileSize / 2, py + drawTileSize / 2, drawTileSize)
     }
   }
 

@@ -15,6 +15,16 @@ function hashTiles(tiles: string[]): string {
   return (hash >>> 0).toString(16)
 }
 
+function hashJson(value: unknown): string {
+  const text = JSON.stringify(value)
+  let hash = 2166136261
+  for (let i = 0; i < text.length; i += 1) {
+    hash ^= text.charCodeAt(i)
+    hash = Math.imul(hash, 16777619)
+  }
+  return (hash >>> 0).toString(16)
+}
+
 function sideFrameNeighbors(door: { x: number; y: number; side: 'north' | 'east' | 'south' | 'west' }) {
   if (door.side === 'north' || door.side === 'south') {
     return [
@@ -58,6 +68,8 @@ describe('tilemap conversion', () => {
     expect(hashTiles(tilemapA.tiles)).toEqual(hashTiles(tilemapB.tiles))
     expect(tilemapA.rooms).toEqual(tilemapB.rooms)
     expect(tilemapA.doors).toEqual(tilemapB.doors)
+    expect(tilemapA.props).toEqual(tilemapB.props)
+    expect(tilemapA.lights).toEqual(tilemapB.lights)
   })
 
   it('builds non-overlapping room rectangles', () => {
@@ -172,6 +184,42 @@ describe('tilemap conversion', () => {
         expect(frame.y).toBeLessThan(tilemap.height)
         expect(tileAt(frame.x, frame.y)).toBe('wall')
       }
+    }
+  })
+
+  it('generates deterministic visual props and lights', () => {
+    const tilemapA = buildSampleTilemap(445566)
+    const tilemapB = buildSampleTilemap(445566)
+    expect(hashJson(tilemapA.props)).toEqual(hashJson(tilemapB.props))
+    expect(hashJson(tilemapA.lights)).toEqual(hashJson(tilemapB.lights))
+  })
+
+  it('changes visual props or lights for different seeds', () => {
+    const tilemapA = buildSampleTilemap(445566)
+    const tilemapB = buildSampleTilemap(445567)
+    const decorA = `${hashJson(tilemapA.props)}:${hashJson(tilemapA.lights)}`
+    const decorB = `${hashJson(tilemapB.props)}:${hashJson(tilemapB.lights)}`
+    expect(decorA).not.toEqual(decorB)
+  })
+
+  it('places props and lights on floor tiles inside bounds', () => {
+    const tilemap = buildSampleTilemap(778899)
+    const tileAt = (x: number, y: number) => tilemap.tiles[y * tilemap.width + x]
+    for (const prop of tilemap.props) {
+      expect(prop.x).toBeGreaterThanOrEqual(0)
+      expect(prop.y).toBeGreaterThanOrEqual(0)
+      expect(prop.x).toBeLessThan(tilemap.width)
+      expect(prop.y).toBeLessThan(tilemap.height)
+      expect(tileAt(prop.x, prop.y)).toBe('floor')
+    }
+    for (const light of tilemap.lights) {
+      expect(light.x).toBeGreaterThanOrEqual(0)
+      expect(light.y).toBeGreaterThanOrEqual(0)
+      expect(light.x).toBeLessThan(tilemap.width)
+      expect(light.y).toBeLessThan(tilemap.height)
+      expect(tileAt(light.x, light.y)).toBe('floor')
+      expect(light.intensity).toBeGreaterThan(0)
+      expect(light.radius).toBeGreaterThan(0)
     }
   })
 
