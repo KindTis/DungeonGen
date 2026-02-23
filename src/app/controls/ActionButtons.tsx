@@ -7,7 +7,11 @@ interface ActionButtonsProps {
   onGenerate: () => void
   onRandomSeed: () => void
   onDownload: () => void
+  onZoomIn: () => void
+  onZoomOut: () => void
+  onResetView: () => void
   disableDownload: boolean
+  disableZoom?: boolean
 }
 
 export function ActionButtons({
@@ -16,7 +20,11 @@ export function ActionButtons({
   onGenerate,
   onRandomSeed,
   onDownload,
+  onZoomIn,
+  onZoomOut,
+  onResetView,
   disableDownload,
+  disableZoom = false,
 }: ActionButtonsProps) {
   return (
     <section className={styles.group}>
@@ -70,7 +78,18 @@ export function ActionButtons({
       >
         Download PNG
       </button>
+
+      <div className={styles.zoomRow}>
+        <button type="button" className={styles.button} onClick={onZoomIn} disabled={disableZoom}>
+          Zoom +
+        </button>
+        <button type="button" className={styles.button} onClick={onZoomOut} disabled={disableZoom}>
+          Zoom -
+        </button>
+        <button type="button" className={`${styles.button} ${styles.secondary}`} onClick={onResetView} disabled={disableZoom}>
+          Reset View
+        </button>
+      </div>
     </section>
   )
 }
-
